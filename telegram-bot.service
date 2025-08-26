@@ -1,0 +1,23 @@
+[Unit]
+Description=Telegram Bot Service
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/telegram-bot
+ExecStart=/usr/bin/node /opt/telegram-bot/bot.js
+ых Environment
+EnvironmentFile=/opt/telegram-bot/.env
+
+Restart=always
+RestartSec=10
+StartLimitInterval=60
+StartLimitBurst=3
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=telegram-bot
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,16 @@
+# Node.js
+
+node_modules/
+
+# Enviroment
+
+.env
+
+# Logs
+
+logs/
+*.log
+
+# Data
+
+src/data/
