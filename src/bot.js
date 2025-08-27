@@ -27,7 +27,7 @@ let usersData = {};
 let spamProtectionData = {};
 const userState = {};
 const activeInviteLinks = new Map();
-const PENDING_JOINS = new Map(); // Временное хранилище ожидаемых входов
+const PENDING_JOINS = new Map();
 
 const loadUserData = () => {
   try {
@@ -105,13 +105,25 @@ setInterval(() => {
       activeInviteLinks.delete(link);
     }
   }
-}, 10000); // Каждые 10 секунд
+}, 10000);
 
-const channelIdToUrl = (channelId) => {
+const generateChannelLink = (channelId) => {
   if (!channelId) return null;
-  return channelId.startsWith("@")
-    ? `https://t.me/${channelId.slice(1)}`
-    : `https://t.me/c/${channelId.replace(/^-100/, "")}`;
+  
+  if (channelId.startsWith("@")) {
+    return `https://t.me/${channelId.slice(1)}`;
+  }
+  
+  if (channelId.startsWith("-100")) {
+    const numericId = channelId.replace(/^-100/, "");
+    return `https://t.me/c/${numericId}`;
+  }
+  
+  if (channelId.includes("t.me/")) {
+    return channelId;
+  }
+  
+  return `https://t.me/c/${channelId}`;
 };
 
 const checkUserSubscriptions = async (userId) => {
@@ -182,7 +194,7 @@ const revokeInviteLink = async (inviteLink) => {
   }
 };
 
-// Улучшенный обработчик новых участников чата
+// Обработчик новых участников чата
 bot.on("chat_member", async (update) => {
   if (update.chat.id.toString() !== private_chat_id.toString()) return;
   if (update.new_chat_member?.status !== "member") return;
@@ -193,14 +205,12 @@ bot.on("chat_member", async (update) => {
   let isLegitimate = false;
   let expectedUserId = null;
 
-  // Способ 1: Проверка по ссылке (если Telegram передал её)
   if (inviteLink && activeInviteLinks.has(inviteLink)) {
     expectedUserId = activeInviteLinks.get(inviteLink);
     isLegitimate = (joiningUserId === expectedUserId);
     activeInviteLinks.delete(inviteLink);
   }
   
-  // Способ 2: Проверка по ожидаемым входам
   if (!isLegitimate) {
     for (const [userId, data] of PENDING_JOINS.entries()) {
       if (Date.now() < data.expiresAt) {
@@ -214,13 +224,11 @@ bot.on("chat_member", async (update) => {
     }
   }
 
-  // Способ 3: Проверка по users.json
   if (!isLegitimate && usersData[joiningUserId]?.inviteLink) {
     isLegitimate = true;
     expectedUserId = joiningUserId;
   }
 
-  // Если пользователь не легитимный - кикаем
   if (!isLegitimate) {
     try {
       console.log(`🚫 Кикаем нарушителя ${joiningUserId}`);
@@ -228,12 +236,10 @@ bot.on("chat_member", async (update) => {
       await bot.banChatMember(private_chat_id, joiningUserId);
       await bot.unbanChatMember(private_chat_id, joiningUserId);
       
-      // Отзываем ссылку если нашли её
       if (inviteLink) {
         await revokeInviteLink(inviteLink);
       }
       
-      // Уведомляем админов
       const violationText = `🚨 НАРУШИТЕЛЬ В ЧАТЕ!
 ID: ${joiningUserId}
 Username: @${update.new_chat_member.user.username || 'нет'}
@@ -248,10 +254,8 @@ Username: @${update.new_chat_member.user.username || 'нет'}
       console.error("Ошибка при кике:", error);
     }
   } else {
-    // Легитимный пользователь
     console.log(`✅ Легитимный вход: ${joiningUserId}`);
     
-    // Обновляем время входа
     if (usersData[joiningUserId]) {
       usersData[joiningUserId].joinedAt = Date.now();
       saveUserData();
@@ -283,20 +287,23 @@ bot.onText(/\/start/, async (msg) => {
       .filter(channel => channel?.id)
       .map(channel => ({
         text: channel.name || `Канал ${channel.id}`,
-        url: channelIdToUrl(channel.id)
+        url: generateChannelLink(channel.id)
       }));
 
     const keyboard = {
       inline_keyboard: [
         ...buttons.map(button => [button]),
-        [{ text: "🔎 Проверить", callback_data: "check" }]
+        [{ text: "🔎 Проверить подписки", callback_data: "check" }]
       ]
     };
 
     await bot.sendMessage(
       chatId,
-      "Привет! Подпишись на каналы ниже, затем нажми «Проверить».",
-      { reply_markup: keyboard }
+      "👋 *Добро пожаловать!*\n\n📋 *Для доступа необходимо подписаться на все каналы ниже.*\n\nПосле подписки нажмите \"🔎 Проверить подписки\"",
+      { 
+        reply_markup: keyboard,
+        parse_mode: 'Markdown'
+      }
     );
   } catch (e) {
     console.error("Ошибка в /start:", e);
@@ -400,7 +407,7 @@ bot.on("callback_query", async (query) => {
           .filter(channel => missingChannels.includes(channel?.name || ""))
           .map(channel => ({
             text: `Подписаться на ${channel?.name || "канал"}`,
-            url: channelIdToUrl(channel?.id)
+            url: generateChannelLink(channel?.id)
           }));
 
         const keyboard = {
@@ -422,7 +429,6 @@ bot.on("callback_query", async (query) => {
         expire_date: Math.floor(Date.now() / 1000) + 15
       });
 
-      // Сохраняем в трех местах для надежности
       usersData[userId] = {
         id: userId,
         username,
@@ -434,7 +440,7 @@ bot.on("callback_query", async (query) => {
       activeInviteLinks.set(inviteLink.invite_link, userId);
       PENDING_JOINS.set(userId, {
         inviteLink: inviteLink.invite_link,
-        expiresAt: Date.now() + 20000 // 20 секунд для надежности
+        expiresAt: Date.now() + 20000
       });
 
       saveUserData();
